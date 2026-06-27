@@ -1,4 +1,5 @@
-import { GoogleGenAI } from "@google/genai";
+// De Gemini SDK wordt lazy geladen binnen runGeminiAnalysis (zie onder),
+// zodat de function altijd laadt — ook als @google/genai niet mee-gebundeld is.
 
 // Hulpprogramma om JSON op een veilige manier te parsen
 function safeParseJSON(text) {
@@ -133,8 +134,8 @@ function generateDemoAssessment(url, isModel1) {
   };
 }
 
-// De hoofdhandler voor Netlify serverless
-export async function handler(event, context) {
+// De hoofdhandler voor Netlify serverless (intern; gewrapt door `handler` onderaan)
+async function _handler(event, context) {
   // CORS-headers toevoegen
   const headers = {
     "Access-Control-Allow-Origin": "*",
@@ -236,7 +237,9 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
               "anthropic-version": "2023-06-01"
             },
             body: JSON.stringify({
-              model: "claude-3-5-sonnet-20241022",
+              // claude-3-5-sonnet-20241022 is per 2025-10-28 uitgefaseerd (404).
+              // Actueel Sonnet-model:
+              model: "claude-sonnet-4-6",
               max_tokens: 4000,
               temperature: 0.2,
               system: claudeSystemPrompt,
@@ -245,7 +248,14 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
           });
 
           if (!res.ok) {
-            throw new Error(`Anthropic API returned status ${res.status}`);
+            // Log de exacte Anthropic-foutcode zodat per-model fouten zichtbaar zijn
+            const errBody = await res.json().catch(() => ({}));
+            const apiCode = errBody?.error?.type || res.statusText;
+            console.error(
+              `Anthropic API non-200: status=${res.status} code=${apiCode}`,
+              errBody?.error?.message || ""
+            );
+            throw new Error(`Anthropic API returned status ${res.status} (${apiCode})`);
           }
 
           const data = await res.json();
@@ -481,6 +491,7 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
 async function runGeminiAnalysis(geminiKey, modelName, systemInstruction, userPrompt, label) {
   try {
     console.log(`Gemini aanroepen voor ${label}...`);
+    const { GoogleGenAI } = await import("@google/genai");
     const ai = new GoogleGenAI({
       apiKey: geminiKey,
       httpOptions: {
@@ -509,3 +520,27 @@ async function runGeminiAnalysis(geminiKey, modelName, systemInstruction, userPr
     throw err;
   }
 }
+
+// Top-level wrapper: vangt elke onverwachte fout op en geeft altijd geldige JSON
+// terug, zodat de frontend nooit een 502 zonder bruikbare body krijgt.
+export const handler = async (event, context) => {
+  const headers = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Content-Type": "application/json"
+  };
+  try {
+    return await _handler(event, context);
+  } catch (err) {
+    console.error("Onverwachte fout in handler:", err);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({
+        error: "Interne serverfout tijdens analyse.",
+        detail: String(err?.message ?? err)
+      })
+    };
+  }
+};
