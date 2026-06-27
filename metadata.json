@@ -1,0 +1,6 @@
+{
+  "name": "MedSec Compliance Checker",
+  "description": "Analyseer en controleer webapplicaties op medische compliance, GDPR/AVG, NEN 7510 en ISO 27002 met behulp van onafhankelijke AI-expertises.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
