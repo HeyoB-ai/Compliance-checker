@@ -1,6 +1,19 @@
 // De Gemini SDK wordt lazy geladen binnen runGeminiAnalysis (zie onder),
 // zodat de function altijd laadt — ook als @google/genai niet mee-gebundeld is.
 
+// fetch met harde timeout via AbortController. Voorkomt dat een trage of
+// onbereikbare provider de hele function tot de Netlify-limiet (26s) laat
+// hangen → 504. We kappen ruim daaronder af (default 20s).
+async function fetchWithTimeout(url, options, ms = 20000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 // Hulpprogramma om JSON op een veilige manier te parsen
 function safeParseJSON(text) {
   try {
@@ -222,14 +235,16 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
   let usedGeminiForClaude = false;
   let usedGeminiForOpenAI = false;
 
-  // We voeren beide analyses parallel uit
-  const [claudeResult, openaiResult] = await Promise.all([
+  // We voeren beide analyses parallel uit met allSettled, zodat een geslaagd
+  // model altijd doorkomt ook als het andere faalt of time-out — geen enkele
+  // hangende call kan de respons blokkeren tot Netlify afkapt (504).
+  const settled = await Promise.allSettled([
     // --- Model 1: Claude / Anthropic (of Gemini fallback) ---
     (async () => {
       if (anthropicKey) {
         try {
           console.log("Claude API aanroepen...");
-          const res = await fetch("https://api.anthropic.com/v1/messages", {
+          const res = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -240,7 +255,8 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
               // claude-3-5-sonnet-20241022 is per 2025-10-28 uitgefaseerd (404).
               // Actueel Sonnet-model:
               model: "claude-sonnet-4-6",
-              max_tokens: 4000,
+              // 1500 is ruim genoeg voor de gevraagde JSON en aanzienlijk sneller dan 4000.
+              max_tokens: 1500,
               temperature: 0.2,
               system: claudeSystemPrompt,
               messages: [{ role: "user", content: userPrompt }]
@@ -263,7 +279,11 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
           if (parsed) return parsed;
           throw new Error("Ongeldige JSON-structuur ontvangen van Claude.");
         } catch (err) {
-          console.error("Fout bij Claude API call:", err);
+          if (err?.name === "AbortError") {
+            console.error("Claude API time-out (>20s) — call afgebroken.");
+          } else {
+            console.error("Fout bij Claude API call:", err);
+          }
           // Als Claude faalt maar we hebben Gemini, probeer Gemini
           if (geminiKey) {
             return await runGeminiAnalysis(geminiKey, "gemini-3.5-flash", claudeSystemPrompt, userPrompt, "Claude (Fallback)");
@@ -286,7 +306,7 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
       if (openaiKey) {
         try {
           console.log("OpenAI API aanroepen...");
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+          const res = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -294,6 +314,8 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
             },
             body: JSON.stringify({
               model: "gpt-4o",
+              // Begrens de output zodat de call ruim binnen de Netlify-limiet blijft.
+              max_tokens: 1500,
               temperature: 0.7,
               response_format: { type: "json_object" },
               messages: [
@@ -304,7 +326,14 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
           });
 
           if (!res.ok) {
-            throw new Error(`OpenAI API returned status ${res.status}`);
+            // Log de exacte OpenAI-statuscode en body zodat falende calls zichtbaar zijn
+            const errBody = await res.json().catch(() => ({}));
+            const apiCode = errBody?.error?.code || errBody?.error?.type || res.statusText;
+            console.error(
+              `OpenAI API non-200: status=${res.status} code=${apiCode}`,
+              errBody?.error?.message || ""
+            );
+            throw new Error(`OpenAI API returned status ${res.status} (${apiCode})`);
           }
 
           const data = await res.json();
@@ -312,7 +341,11 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
           if (parsed) return parsed;
           throw new Error("Ongeldige JSON-structuur ontvangen van OpenAI.");
         } catch (err) {
-          console.error("Fout bij OpenAI API call:", err);
+          if (err?.name === "AbortError") {
+            console.error("OpenAI API time-out (>20s) — call afgebroken.");
+          } else {
+            console.error("Fout bij OpenAI API call:", err);
+          }
           // Als OpenAI faalt maar we hebben Gemini, probeer Gemini
           if (geminiKey) {
             return await runGeminiAnalysis(geminiKey, "gemini-3.5-flash", openaiSystemPrompt, userPrompt, "OpenAI (Fallback)");
@@ -329,11 +362,17 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
         return generateDemoAssessment(url, false);
       }
     })()
-  ]).catch(err => {
-    // Vang eventuele fatale onbehandelde fouten op
-    console.error("Fatale fout in parallelle LLM verwerking:", err);
-    return [null, null];
-  });
+  ]);
+
+  // Een afgewezen (gefaald/getimeout) model wordt null → demo-fallback hieronder.
+  const claudeResult = settled[0].status === "fulfilled" ? settled[0].value : null;
+  const openaiResult = settled[1].status === "fulfilled" ? settled[1].value : null;
+  if (settled[0].status === "rejected") {
+    console.error("Model 1 (Claude) afgewezen:", settled[0].reason?.message || settled[0].reason);
+  }
+  if (settled[1].status === "rejected") {
+    console.error("Model 2 (OpenAI) afgewezen:", settled[1].reason?.message || settled[1].reason);
+  }
 
   // Valideer dat we resultaten hebben gekregen
   const model1Data = claudeResult || generateDemoAssessment(url, true);
