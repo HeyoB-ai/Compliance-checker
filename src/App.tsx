@@ -409,6 +409,7 @@ export default function App() {
 
   const activeScoreConfig = getScoreConfig(result.consensus.algehele_score);
   const sig = result.signals; // lokale const → TS narrowt 'sig' correct in geneste callbacks
+  const ver = result.verificatie;
 
   return (
     <div className="min-h-screen bg-[#0d1117] text-[#e6edf3] font-sans antialiased selection:bg-blue-500/30 selection:text-white pb-16">
@@ -777,6 +778,60 @@ export default function App() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* CERTIFICERING VERIFIËREN — verifieerbare NEN-registerlink, geen score-effect */}
+            {ver && (
+              <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5">
+                <div className="flex items-center justify-between border-b border-[#30363d] pb-3 mb-4">
+                  <div className="flex items-center space-x-2">
+                    <Award className="w-4.5 h-4.5 text-blue-400" />
+                    <h4 className="font-bold text-white text-sm">Certificering verifiëren</h4>
+                  </div>
+                  <span className="text-[9px] font-mono px-2 py-0.5 rounded border bg-[#21262d] text-[#8b949e] border-[#30363d] uppercase tracking-wider">
+                    Beïnvloedt score niet
+                  </span>
+                </div>
+
+                <div
+                  className={`rounded-lg border p-4 ${
+                    ver.status === "nen7510-claim"
+                      ? "border-blue-500/30 bg-blue-950/10"
+                      : ver.status === "iso-claim"
+                      ? "border-amber-500/30 bg-amber-950/10"
+                      : "border-[#30363d] bg-[#0d1117]"
+                  }`}
+                >
+                  <h5 className="text-sm font-semibold text-white mb-1.5">{ver.titel}</h5>
+                  <p className="text-[12px] text-[#c9d1d9] leading-relaxed">{ver.boodschap}</p>
+
+                  {ver.toonRegisterLink && (
+                    <div className="mt-3.5 flex flex-col sm:flex-row sm:items-center gap-3">
+                      <a
+                        href={ver.nenRegisterUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center gap-2 bg-[#238636] hover:bg-[#2ea043] text-white font-semibold text-xs px-4 py-2.5 rounded-lg transition-all active:scale-[0.98] shadow-lg shadow-green-950/20 shrink-0"
+                      >
+                        <span>Verifieer in NEN 7510-register</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                      {ver.zoekhint && (
+                        <span className="text-[11px] text-[#8b949e] font-mono">
+                          Zoekhint: <span className="text-[#c9d1d9]">"{ver.zoekhint}"</span>
+                          <span className="text-[#484f58]"> (indicatief — zoek in het register op organisatienaam)</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Eerlijke disclaimer — altijd zichtbaar */}
+                <div className="mt-4 p-3 rounded-lg border border-amber-500/20 bg-amber-950/10 text-[11px] text-[#8b949e] leading-relaxed flex items-start gap-2">
+                  <Info className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <span>{ver.disclaimer}</span>
+                </div>
               </div>
             )}
 

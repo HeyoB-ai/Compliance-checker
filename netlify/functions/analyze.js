@@ -189,6 +189,78 @@ ${(s.fouten || []).length ? s.fouten.map((f) => "    - " + f).join("\n") : "    
 LET OP: certificeringen hierboven zijn CLAIMS op de eigen site, geen bewijs van daadwerkelijke certificering. Serverconfiguratie, verwerkersovereenkomsten en interne ISMS zijn vanaf de buitenkant NIET verifieerbaar.`;
 }
 
+// Officieel, openbaar NEN 7510-register (geen API; doorzoekbare webpagina).
+const NEN_REGISTER_URL = "https://nen.bettywebblocks.com/view-nen-7510";
+
+// Altijd zichtbare, eerlijke disclaimer bij het register.
+const NEN_REGISTER_DISCLAIMER =
+  "Het NEN 7510-register is niet volledig: vermelding hangt af van opgave door de certificerende instelling, en NEN 7510-certificering is niet wettelijk verplicht. Een organisatie die niet in het register staat, kan dus alsnog compliant of gecertificeerd zijn. Gebruik deze link om een claim te verifiëren, niet om afwezigheid als bewijs te zien.";
+
+// Leid een (puur indicatieve) zoekhint af uit de hostnaam — als hulpje voor de
+// gebruiker bij het handmatig zoeken op organisatienaam. Geen belofte dat dit klopt.
+function afgeleideZoekhint(url, signals) {
+  let host = signals?.domein || "";
+  if (!host) {
+    try {
+      host = new URL(/^https?:\/\//i.test(url) ? url : "https://" + url).hostname;
+    } catch {
+      host = String(url || "");
+    }
+  }
+  host = host.replace(/^www\./i, "");
+  const label = host.split(".")[0] || host;
+  return label.replace(/[-_]+/g, " ").trim();
+}
+
+// Bouwt een puur informatief verificatie-blok op basis van de geclaimde
+// certificeringen uit spoor 2. BEÏNVLOEDT DE SCORE NIET — alleen verwijzing.
+// Afwezigheid in het register mag nooit als bewijs of als negatief tellen.
+export function buildVerificatie(url, signals) {
+  const gevonden = signals?.certificeringen?.gevonden || [];
+  const claimtNen = gevonden.some((c) => c.norm === "NEN 7510");
+  const claimtIso = gevonden.some((c) => c.norm === "ISO 27001" || c.norm === "ISO 27002");
+  const zoekhint = afgeleideZoekhint(url, signals);
+
+  const base = {
+    nenRegisterUrl: NEN_REGISTER_URL,
+    zoekhint,
+    claimt: { nen7510: claimtNen, iso: claimtIso },
+    disclaimer: NEN_REGISTER_DISCLAIMER,
+    beinvloedtScore: false
+  };
+
+  if (claimtNen) {
+    return {
+      ...base,
+      status: "nen7510-claim",
+      toonRegisterLink: true,
+      titel: "NEN 7510-claim gevonden — verifieer zelf",
+      boodschap:
+        "Deze organisatie claimt op de eigen site NEN 7510. Die claim is niet door ons geverifieerd, maar u kunt hem zelf controleren in het officiële, openbare NEN 7510-register. Zoek daar op de organisatienaam."
+    };
+  }
+
+  if (claimtIso) {
+    return {
+      ...base,
+      status: "iso-claim",
+      toonRegisterLink: false, // geen NEN-link voor een ISO-claim — dat zou verwarrend zijn
+      titel: "ISO 27001/27002-claim gevonden",
+      boodschap:
+        "Deze organisatie claimt een ISO-certificering (27001/27002), maar geen NEN 7510. ISO-certificaten staan niet in het NEN 7510-register. Verificatie van een ISO-claim loopt via de certificerende instelling of het ISO-certificaat zelf, niet via dit register."
+    };
+  }
+
+  return {
+    ...base,
+    status: "geen-claim",
+    toonRegisterLink: true,
+    titel: "Geen certificeringsclaim aangetroffen",
+    boodschap:
+      "Er is op de site geen NEN 7510- of ISO-certificeringsclaim aangetroffen. Dit is géén aanwijzing dat de organisatie niet gecertificeerd is. Wilt u het toch nagaan, dan kunt u het officiële NEN 7510-register raadplegen."
+  };
+}
+
 // De hoofdhandler voor Netlify serverless (intern; gewrapt door `handler` onderaan)
 async function _handler(event, context) {
   // CORS-headers toevoegen
@@ -561,6 +633,9 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
     // Opgehaalde, objectieve signalen waarop de beoordeling (mede) is gebaseerd.
     // Wordt in de UI getoond zodat de score navolgbaar is.
     signals,
+    // Puur informatief verificatie-blok (NEN-registerlink). Los van de scores —
+    // beïnvloedt de beoordeling NIET. Afwezigheid in het register is geen bewijs.
+    verificatie: buildVerificatie(url, signals),
     consensus: {
       algehele_score: algeheleConsensusScore,
       classificatie: consensusClassificatie,

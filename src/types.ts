@@ -126,4 +126,18 @@ export interface AnalysisPayload {
   risks: RiskFinding[];
   positives: PositiveFinding[];
   signals?: Signals | null;
+  verificatie?: Verificatie | null;
+}
+
+// --- Verifieerbare NEN 7510-registerverwijzing (puur informatief, geen score-effect) ---
+export interface Verificatie {
+  nenRegisterUrl: string;
+  zoekhint: string;
+  claimt: { nen7510: boolean; iso: boolean };
+  disclaimer: string;
+  beinvloedtScore: boolean;
+  status: "nen7510-claim" | "iso-claim" | "geen-claim";
+  toonRegisterLink: boolean;
+  titel: string;
+  boodschap: string;
 }

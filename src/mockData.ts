@@ -176,5 +176,18 @@ export const defaultAnalysis: AnalysisPayload = {
     },
     fouten: [],
     durationMs: 980
+  },
+  verificatie: {
+    nenRegisterUrl: "https://nen.bettywebblocks.com/view-nen-7510",
+    zoekhint: "zorgportaal nederland",
+    claimt: { nen7510: true, iso: false },
+    disclaimer:
+      "Het NEN 7510-register is niet volledig: vermelding hangt af van opgave door de certificerende instelling, en NEN 7510-certificering is niet wettelijk verplicht. Een organisatie die niet in het register staat, kan dus alsnog compliant of gecertificeerd zijn. Gebruik deze link om een claim te verifiëren, niet om afwezigheid als bewijs te zien.",
+    beinvloedtScore: false,
+    status: "nen7510-claim",
+    toonRegisterLink: true,
+    titel: "NEN 7510-claim gevonden — verifieer zelf",
+    boodschap:
+      "Deze organisatie claimt op de eigen site NEN 7510. Die claim is niet door ons geverifieerd, maar u kunt hem zelf controleren in het officiële, openbare NEN 7510-register. Zoek daar op de organisatienaam."
   }
 };
