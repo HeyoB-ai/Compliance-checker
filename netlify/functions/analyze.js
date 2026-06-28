@@ -1,3 +1,5 @@
+import { collectSignals } from "./collectSignals.js";
+
 // De Gemini SDK wordt lazy geladen binnen runGeminiAnalysis (zie onder),
 // zodat de function altijd laadt — ook als @google/genai niet mee-gebundeld is.
 
@@ -147,6 +149,46 @@ function generateDemoAssessment(url, isModel1) {
   };
 }
 
+// Zet het signals-object om naar een compact, leesbaar feitenblok voor de LLM's.
+function signalsToPromptText(s) {
+  if (!s) return "Geen signalen beschikbaar (verzameling mislukt). Behandel alles als ONBEKEND.";
+  const ja = (b) => (b === true ? "JA" : b === false ? "NEE" : "ONBEKEND");
+
+  const headerRegels = (s.securityHeaders?.items || [])
+    .map((h) => `    - ${h.naam}: ${h.aanwezig === null ? "ONBEKEND" : h.aanwezig ? "aanwezig" : "afwezig"}`)
+    .join("\n");
+
+  const privRegels = (s.privacybeleid?.items || [])
+    .map((p) => `    - ${p.naam}: ${p.gevonden ? "gevonden" : "niet gevonden"}`)
+    .join("\n");
+
+  const certRegels =
+    (s.certificeringen?.gevonden || []).length > 0
+      ? s.certificeringen.gevonden.map((c) => `    - ${c.norm} (geclaimd op ${c.op})`).join("\n")
+      : "    - (geen specifieke norm letterlijk genoemd)";
+
+  return `OPGEHAALDE SIGNALEN (objectief gemeten van de doel-URL, ${s.fetchedAt}):
+
+[GEMETEN — verifieerbaar opgehaald]
+- Bereikbaarheid over HTTPS: ${s.https?.status} (httpsBereikbaar=${ja(s.https?.httpsBereikbaar)}, TLS-handshake ok=${ja(s.https?.tlsOk)}, http→https doorverwijzing=${ja(s.https?.httpDoorverwijzing)})
+- HTTP-securityheaders (${s.securityHeaders?.aanwezig}/${s.securityHeaders?.totaal} aanwezig), status=${s.securityHeaders?.status}:
+${headerRegels || "    - ONBEKEND"}
+- security.txt: ${s.securityTxt?.status}${s.securityTxt?.gevondenOp ? ` (op ${s.securityTxt.gevondenOp}, Contact-veld=${ja(s.securityTxt.heeftContact)}, Policy-veld=${ja(s.securityTxt.heeftPolicy)})` : ""}
+- Privacy-/cookiebeleid gevonden: ${s.privacybeleid?.status}${s.privacybeleid?.gevondenOp ? ` (${s.privacybeleid.gevondenOp})` : ""}
+${privRegels ? "  Concrete compliance-signalen in dat beleid:\n" + privRegels : ""}
+- Pagina-taal: ${s.metaInfo?.taal || "ONBEKEND"} | Contact/colofon aanwezig: ${ja(s.metaInfo?.heeftContactOfColofon)} | EU/NL-TLD: ${ja(s.metaInfo?.euTld)}
+
+[GECLAIMD OP EIGEN SITE — niet onafhankelijk geverifieerd]
+- Certificeringen/normen genoemd op de site (status: ${s.certificeringen?.status}):
+${certRegels}
+${(s.certificeringen?.trefwoorden || []).length ? "    - Trefwoorden: " + s.certificeringen.trefwoorden.join(", ") : ""}
+
+[ONBEKEND / NIET OPHAALBAAR]
+${(s.fouten || []).length ? s.fouten.map((f) => "    - " + f).join("\n") : "    - (geen ophaalfouten)"}
+
+LET OP: certificeringen hierboven zijn CLAIMS op de eigen site, geen bewijs van daadwerkelijke certificering. Serverconfiguratie, verwerkersovereenkomsten en interne ISMS zijn vanaf de buitenkant NIET verifieerbaar.`;
+}
+
 // De hoofdhandler voor Netlify serverless (intern; gewrapt door `handler` onderaan)
 async function _handler(event, context) {
   // CORS-headers toevoegen
@@ -198,16 +240,43 @@ async function _handler(event, context) {
   console.log(`Analyse starten voor URL: ${url}`);
   console.log(`API Keys status - Anthropic: ${anthropicKey ? "JA" : "NEE"}, OpenAI: ${openaiKey ? "JA" : "NEE"}, Gemini: ${geminiKey ? "JA" : "NEE"}`);
 
-  // Base system prompts
-  const systemPromptBase = `Je bent een gespecialiseerde medische IT-compliance expert met diepgaande kennis van: AVG/GDPR (incl. artikel 9 bijzondere categorieën gezondheidsgegevens), NEN 7510, ISO 27001/27799, ISO 27002:2022 (93 beheersmaatregelen over organisatorisch, mensen, fysiek en technologisch), de UAVG, de WGBO, en richtlijnen van IGJ en CIBG voor medische software. Analyseer de opgegeven URL op geschiktheid voor gebruik in de Nederlandse medische sector. Baseer je op de URL-structuur en domeinnaam, bekende informatie over dit type aanbieder, en gangbare praktijken in de sector. Wees kritisch maar eerlijk. Retourneer UITSLUITEND valide JSON in het afgesproken formaat.`;
+  // --- Echte signalen ophalen vóór de LLM-beoordeling (hard tijdsbudget) ---
+  // Gooit nooit; bij mislukking krijgen we een object vol "onbekend"-statussen.
+  let signals = null;
+  try {
+    signals = await collectSignals(url, { budgetMs: 8000 });
+    console.log(
+      `Signalen verzameld in ${signals.durationMs}ms — bereikbaar=${signals.reachable}, ` +
+        `securityheaders=${signals.securityHeaders.aanwezig}/${signals.securityHeaders.totaal}, ` +
+        `security.txt=${signals.securityTxt.status}, privacy=${signals.privacybeleid.status}, ` +
+        `certificeringen=${signals.certificeringen.status}`
+    );
+  } catch (sigErr) {
+    console.error("Signaalverzameling faalde onverwacht:", sigErr);
+  }
+  const signalsText = signalsToPromptText(signals);
 
-  const claudeSystemPrompt = `${systemPromptBase}\n\nRol focus: Security expert — focus op technische beveiligingsmaatregelen, encryptie (in transit en at rest), toegangscontrole, en kwetsbaarheden. Wees uiterst grondig in je technische oordeel.`;
-  const openaiSystemPrompt = `Je bent een kritische juridische auditor gespecialiseerd in zorgwetgeving, met een conservatieve beoordelingsstijl met diepgaande kennis van: AVG/GDPR (incl. artikel 9 bijzondere categorieën gezondheidsgegevens), NEN 7510, ISO 27001/27799, ISO 27002:2022 (93 beheersmaatregelen over organisatorisch, mensen, fysiek en technologisch), de UAVG, de WGBO, en richtlijnen van IGJ en CIBG voor medische software. Analyseer de opgegeven URL op geschiktheid voor gebruik in de Nederlandse medische sector. Baseer je op de URL-structuur en domeinnaam, bekende informatie over dit type aanbieder, en gangbare praktijken in de sector. Wees kritisch maar eerlijk. Retourneer UITSLUITEND valide JSON in het afgesproken formaat.\n\nRol focus: Conservatieve juridische/compliance auditor — focus op GDPR/AVG compliance, ISO 27002 beheersmaatregelen, verwerkersovereenkomsten, en de rechten van betrokkenen. Wees uiterst streng en conservatief in je oordeel.`;
+  // Base system prompts — beoordeel op de OPGEHAALDE SIGNALEN, niet op aannames.
+  const systemPromptBase = `Je bent een gespecialiseerde medische IT-compliance expert met diepgaande kennis van: AVG/GDPR (incl. artikel 9 bijzondere categorieën gezondheidsgegevens), NEN 7510, ISO 27001/27799, ISO 27002:2022, de UAVG, de WGBO, en richtlijnen van IGJ en CIBG voor medische software.
 
-  const userPrompt = `Analyseer de volgende webapplicatie-URL grondig op medische IT-compliance en dataveiligheid:
+BEOORDELINGSREGELS (strikt):
+1. Beoordeel UITSLUITEND op basis van de meegeleverde, opgehaalde SIGNALEN plus je algemene vakinhoudelijke kader. Verzin GEEN feiten over de organisatie, infrastructuur of contracten.
+2. Onderscheid expliciet drie soorten bevindingen: (a) GEMETEN — objectief opgehaald (HTTPS, securityheaders, security.txt, aanwezigheid privacybeleid); (b) GECLAIMD OP EIGEN SITE — normen/certificeringen die de site zelf noemt maar die niet onafhankelijk geverifieerd zijn; (c) ONBEKEND — niet ophaalbaar vanaf de buitenkant.
+3. Waar een signaal ONBEKEND is, MOET je dat als onzekerheid laten meewegen en het expliciet benoemen — vul het NIET in met een aanname. Onbekend is geen bewijs van afwezigheid, maar mag ook niet positief gescoord worden.
+4. Presenteer een geclaimde certificering nooit als geverifieerd feit; benoem het als "geclaimd op eigen site".
+5. Bedenk dat serverconfiguratie, verwerkersovereenkomsten en interne ISMS NIET vanaf de buitenkant te verifiëren zijn; weeg dat mee als onzekerheid, niet als tekortkoming op zich.
+6. Onderbouw elke score-categorie kort met het concrete signaal waarop je je baseert (veld "gebaseerd_op"). Retourneer UITSLUITEND valide JSON in het afgesproken formaat.`;
+
+  const claudeSystemPrompt = `${systemPromptBase}\n\nRol focus: Security expert — focus op technische beveiligingsmaatregelen die uit de signalen blijken (HTTPS/TLS, securityheaders zoals HSTS/CSP, security.txt). Wees grondig maar baseer je oordeel op de gemeten signalen, niet op vermoedens.`;
+  const openaiSystemPrompt = `Je bent een kritische juridische auditor gespecialiseerd in zorgwetgeving (AVG/GDPR incl. art. 9, NEN 7510, ISO 27001/27002, UAVG, WGBO, IGJ/CIBG), met een conservatieve beoordelingsstijl.\n\n${systemPromptBase}\n\nRol focus: Conservatieve juridische/compliance auditor — focus op wat de opgehaalde signalen zeggen over AVG-naleving (privacybeleid, verwerkersovereenkomst, FG/DPO, grondslag, bewaartermijnen, rechten van betrokkenen) en geclaimde normen. Wees streng: ontbrekende of onbekende signalen leiden tot voorbehoud, niet tot een aanname.`;
+
+  const userPrompt = `Beoordeel de geschiktheid van de volgende webapplicatie voor de Nederlandse zorgsector, UITSLUITEND op basis van de hieronder opgehaalde signalen plus je vakkennis.
+
 URL: ${url}
 
-Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of markdown):
+${signalsText}
+
+Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of markdown). Verwerk in "samenvatting" en "model_perspectief" expliciet welke signalen GEMETEN, GECLAIMD of ONBEKEND zijn:
 {
   "scores": {
     "gdpr": 0,
@@ -221,11 +290,12 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
   "algehele_score": 0,
   "classificatie": "Onvoldoende|Risicovol|Voldoende|Goed|Uitstekend",
   "aanbeveling": "Niet geschikt|Gebruik met voorbehoud|Geschikt met maatregelen|Geschikt",
+  "gebaseerd_op": "Korte toelichting welke concrete signalen de scores het meest bepaalden, en wat onbekend bleef.",
   "positief": [
-    { "titel": "...", "toelichting": "..." }
+    { "titel": "...", "toelichting": "...", "bron": "gemeten|geclaimd op eigen site|afgeleid" }
   ],
   "risico": [
-    { "titel": "...", "ernst": "Laag|Middel|Hoog|Kritiek", "toelichting": "..." }
+    { "titel": "...", "ernst": "Laag|Middel|Hoog|Kritiek", "toelichting": "...", "bron": "gemeten|onbekend (niet verifieerbaar)|afgeleid" }
   ],
   "samenvatting": "...",
   "model_perspectief": "..."
@@ -257,11 +327,13 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
               model: "claude-sonnet-4-6",
               // 1500 is ruim genoeg voor de gevraagde JSON en aanzienlijk sneller dan 4000.
               max_tokens: 1500,
+              // Lage temperature: de input is nu feitelijk, dus we willen consistentie i.p.v. creativiteit.
               temperature: 0.2,
               system: claudeSystemPrompt,
               messages: [{ role: "user", content: userPrompt }]
             })
-          });
+            // 15s LLM-timeout: signaalverzameling (~8s) + LLM (~15s) blijft binnen de 26s Netlify-limiet.
+          }, 15000);
 
           if (!res.ok) {
             // Log de exacte Anthropic-foutcode zodat per-model fouten zichtbaar zijn
@@ -316,14 +388,15 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
               model: "gpt-4o",
               // Begrens de output zodat de call ruim binnen de Netlify-limiet blijft.
               max_tokens: 1500,
-              temperature: 0.7,
+              // Lage temperature: feitelijke input → consistente beoordeling i.p.v. creativiteit.
+              temperature: 0.2,
               response_format: { type: "json_object" },
               messages: [
                 { role: "system", content: openaiSystemPrompt },
                 { role: "user", content: userPrompt }
               ]
             })
-          });
+          }, 15000);
 
           if (!res.ok) {
             // Log de exacte OpenAI-statuscode en body zodat falende calls zichtbaar zijn
@@ -485,6 +558,9 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
       hasRealAnthropic: !!anthropicKey,
       hasRealOpenAI: !!openaiKey
     },
+    // Opgehaalde, objectieve signalen waarop de beoordeling (mede) is gebaseerd.
+    // Wordt in de UI getoond zodat de score navolgbaar is.
+    signals,
     consensus: {
       algehele_score: algeheleConsensusScore,
       classificatie: consensusClassificatie,
@@ -503,6 +579,7 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
       aanbeveling: model1Data.aanbeveling || "Gebruik met voorbehoud",
       samenvatting: model1Data.samenvatting || "",
       model_perspectief: model1Data.model_perspectief || "",
+      gebaseerd_op: model1Data.gebaseerd_op || "",
       scores: model1Data.scores || {}
     },
     model2: {
@@ -513,6 +590,7 @@ Je MOET antwoorden in het volgende exacte JSON-formaat (zonder andere tekst of m
       aanbeveling: model2Data.aanbeveling || "Gebruik met voorbehoud",
       samenvatting: model2Data.samenvatting || "",
       model_perspectief: model2Data.model_perspectief || "",
+      gebaseerd_op: model2Data.gebaseerd_op || "",
       scores: model2Data.scores || {}
     },
     risks,

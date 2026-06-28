@@ -106,6 +106,38 @@ function getScoreConfig(score: number) {
   };
 }
 
+// Compacte ja/nee/onbekend-indicator voor een gemeten signaal
+function BoolTag({ v }: { v: boolean | null | undefined }) {
+  if (v === true) return <span className="text-[#2ea043] font-bold">✓ ja</span>;
+  if (v === false) return <span className="text-red-400 font-bold">✗ nee</span>;
+  return <span className="text-[#8b949e]">— onbekend</span>;
+}
+
+// Markeer een signaal als gemeten / geclaimd op eigen site / niet gevonden / onbekend
+function signalStatusStyle(status: string) {
+  const s = (status || "").toLowerCase();
+  if (s === "gevonden" || s === "gemeten") {
+    return { label: "Gemeten", cls: "bg-green-500/10 text-[#2ea043] border-[#238636]/30" };
+  }
+  if (s.startsWith("geclaimd")) {
+    return { label: "Geclaimd op eigen site", cls: "bg-amber-500/10 text-amber-400 border-amber-500/30" };
+  }
+  if (s === "afwezig" || s === "niet gevonden") {
+    return { label: "Niet gevonden", cls: "bg-red-500/10 text-red-400 border-red-500/30" };
+  }
+  return { label: "Onbekend", cls: "bg-[#21262d] text-[#8b949e] border-[#30363d]" };
+}
+
+// Klein label voor de herkomst van een bevinding (gemeten / geclaimd / afgeleid)
+function bronBadgeStyle(bron?: string) {
+  const b = (bron || "").toLowerCase();
+  if (b.startsWith("gemeten")) return { label: "gemeten", cls: "bg-green-500/10 text-[#2ea043] border-[#238636]/30" };
+  if (b.startsWith("geclaimd")) return { label: "geclaimd", cls: "bg-amber-500/10 text-amber-400 border-amber-500/30" };
+  if (b.startsWith("onbekend")) return { label: "niet verifieerbaar", cls: "bg-[#21262d] text-[#8b949e] border-[#30363d]" };
+  if (b) return { label: b, cls: "bg-blue-500/10 text-blue-400 border-blue-500/20" };
+  return null;
+}
+
 // Vertaling voor categorie-sleutels naar human readable Nederlands
 const catNameTranslations: Record<string, string> = {
   gdpr: "AVG / GDPR",
@@ -129,7 +161,7 @@ export default function App() {
 
   // Stepper stappen definities
   const steps = [
-    { id: 1, label: "Metadata & Domein", desc: "URL valideren & DNS-architectuur inschatten" },
+    { id: 1, label: "Signalen Ophalen", desc: "HTTPS, securityheaders, security.txt & privacybeleid ophalen" },
     { id: 2, label: "Claude Analyse", desc: "Technische beveiliging & encryptie controleren" },
     { id: 3, label: "GPT-4o Analyse", desc: "GDPR/AVG-compliance & medische audits uitvoeren" },
     { id: 4, label: "Consensus Synthese", desc: "Scores middelen & bevindingen groeperen" }
@@ -376,6 +408,7 @@ export default function App() {
   ].sort((a, b) => b.score - a.score);
 
   const activeScoreConfig = getScoreConfig(result.consensus.algehele_score);
+  const sig = result.signals; // lokale const → TS narrowt 'sig' correct in geneste callbacks
 
   return (
     <div className="min-h-screen bg-[#0d1117] text-[#e6edf3] font-sans antialiased selection:bg-blue-500/30 selection:text-white pb-16">
@@ -425,9 +458,10 @@ export default function App() {
               MedSec Compliance Checker
             </h2>
             <p className="text-[#8b949e] text-sm leading-relaxed">
-              Voer de URL in van een willekeurige webapplicatie om een automatische compliance-scan uit te voeren. 
-              Twee onafhankelijke AI-expertises analyseren de dataveiligheid (GDPR/AVG), NEN 7510 geschiktheid 
-              en ISO 27002 beheersmaatregelen voor inzet in de Nederlandse zorgsector.
+              Voer de URL in van een webapplicatie. De scan haalt eerst <span className="text-[#c9d1d9]">echte, objectief
+              meetbare signalen</span> op van de site (HTTPS/TLS, securityheaders, security.txt, privacybeleid en geclaimde
+              normen). Twee onafhankelijke AI-modellen beoordelen die feiten — met bronvermelding en expliciete onzekerheid —
+              op geschiktheid (AVG/GDPR, NEN 7510, ISO 27002) voor de Nederlandse zorgsector.
             </p>
 
             {/* Input Form */}
@@ -589,6 +623,162 @@ export default function App() {
                 </p>
               </div>
             </div>
+
+            {/* ONDERZOCHTE SIGNALEN — transparantie over de feitenbasis */}
+            {sig && (
+              <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#30363d] pb-3 mb-4">
+                  <div className="flex items-center space-x-2">
+                    <Terminal className="w-4.5 h-4.5 text-blue-400" />
+                    <h4 className="font-bold text-white text-sm">Onderzochte signalen</h4>
+                    <span className="text-[10px] text-[#8b949e] font-mono">extern waarneembaar</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-[9px] font-mono uppercase tracking-wider">
+                    <span className="px-2 py-0.5 rounded border bg-green-500/10 text-[#2ea043] border-[#238636]/30">Gemeten</span>
+                    <span className="px-2 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/30">Geclaimd op eigen site</span>
+                    <span className="px-2 py-0.5 rounded border bg-red-500/10 text-red-400 border-red-500/30">Niet gevonden</span>
+                    <span className="px-2 py-0.5 rounded border bg-[#21262d] text-[#8b949e] border-[#30363d]">Onbekend</span>
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-[#8b949e] leading-relaxed mb-4 font-sans">
+                  Deze feiten zijn objectief opgehaald van de doel-URL en vormen de basis voor de AI-beoordeling.
+                  Wat niet ophaalbaar was, staat als <span className="text-[#8b949e] font-semibold">onbekend</span> en is niet als
+                  feit ingevuld. Een geclaimde norm is een vermelding op de eigen site, geen onafhankelijk bewijs.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {/* HTTPS / TLS */}
+                  <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                        <Lock className="w-3.5 h-3.5 text-blue-400" /> HTTPS / TLS
+                      </div>
+                      {(() => { const st = signalStatusStyle(sig.https.status); return (
+                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
+                      ); })()}
+                    </div>
+                    <ul className="text-[11px] text-[#8b949e] space-y-1 font-mono">
+                      <li>HTTPS bereikbaar: <BoolTag v={sig.https.httpsBereikbaar} /></li>
+                      <li>http → https: <BoolTag v={sig.https.httpDoorverwijzing} /></li>
+                      <li>TLS-handshake: <BoolTag v={sig.https.tlsOk} /></li>
+                    </ul>
+                  </div>
+
+                  {/* Security headers */}
+                  <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                        <Server className="w-3.5 h-3.5 text-blue-400" /> Security-headers
+                      </div>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border bg-green-500/10 text-[#2ea043] border-[#238636]/30">
+                        {sig.securityHeaders.aanwezig}/{sig.securityHeaders.totaal} gemeten
+                      </span>
+                    </div>
+                    <ul className="text-[11px] text-[#8b949e] space-y-1 font-mono">
+                      {sig.securityHeaders.items.map((h, i) => (
+                        <li key={i} className="flex items-center justify-between gap-2">
+                          <span className="truncate">{h.naam.split(" (")[0]}</span>
+                          <BoolTag v={h.aanwezig} />
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* security.txt */}
+                  <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                        <FileText className="w-3.5 h-3.5 text-blue-400" /> security.txt
+                      </div>
+                      {(() => { const st = signalStatusStyle(sig.securityTxt.status); return (
+                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
+                      ); })()}
+                    </div>
+                    {sig.securityTxt.status === "gevonden" ? (
+                      <ul className="text-[11px] text-[#8b949e] space-y-1 font-mono">
+                        <li>Contact-veld: <BoolTag v={sig.securityTxt.heeftContact} /></li>
+                        <li>Policy-veld: <BoolTag v={sig.securityTxt.heeftPolicy} /></li>
+                      </ul>
+                    ) : (
+                      <p className="text-[11px] text-[#8b949e] font-mono">Geen /.well-known/security.txt aangetroffen.</p>
+                    )}
+                  </div>
+
+                  {/* Privacybeleid */}
+                  <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                        <Scale className="w-3.5 h-3.5 text-blue-400" /> Privacy-/cookiebeleid
+                      </div>
+                      {(() => { const st = signalStatusStyle(sig.privacybeleid.status); return (
+                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
+                      ); })()}
+                    </div>
+                    {sig.privacybeleid.status === "gevonden" ? (
+                      <ul className="text-[11px] text-[#8b949e] space-y-1 font-mono">
+                        {sig.privacybeleid.items.map((p, i) => (
+                          <li key={i} className="flex items-center justify-between gap-2">
+                            <span className="truncate">{p.naam.split(" (")[0]}</span>
+                            <BoolTag v={p.gevonden} />
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-[11px] text-[#8b949e] font-mono">Geen privacy-/cookiepagina gevonden om te analyseren.</p>
+                    )}
+                  </div>
+
+                  {/* Geclaimde certificeringen */}
+                  <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                        <Award className="w-3.5 h-3.5 text-blue-400" /> Geclaimde normen
+                      </div>
+                      {(() => { const st = signalStatusStyle(sig.certificeringen.status); return (
+                        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${st.cls}`}>{st.label}</span>
+                      ); })()}
+                    </div>
+                    {sig.certificeringen.gevonden.length > 0 || sig.certificeringen.trefwoorden.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {sig.certificeringen.gevonden.map((c, i) => (
+                          <span key={i} className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-amber-500/10 text-amber-400 border-amber-500/30">{c.norm}</span>
+                        ))}
+                        {sig.certificeringen.trefwoorden.map((t, i) => (
+                          <span key={`t-${i}`} className="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-[#21262d] text-[#8b949e] border-[#30363d]">{t}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-[#8b949e] font-mono">Geen normen (NEN 7510, ISO 27001/27002) op de site genoemd.</p>
+                    )}
+                    <p className="text-[9px] text-[#8b949e] italic leading-snug pt-1">Vermelding op de eigen site — niet onafhankelijk geverifieerd.</p>
+                  </div>
+
+                  {/* Domein-metadata */}
+                  <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3.5 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-white">
+                      <Globe className="w-3.5 h-3.5 text-blue-400" /> Domein-metadata
+                    </div>
+                    <ul className="text-[11px] text-[#8b949e] space-y-1 font-mono">
+                      <li>Pagina-taal: <span className="text-[#c9d1d9]">{sig.metaInfo.taal || "onbekend"}</span></li>
+                      <li>EU/NL-domein: <BoolTag v={sig.metaInfo.euTld} /></li>
+                      <li>Contact/colofon: <BoolTag v={sig.metaInfo.heeftContactOfColofon} /></li>
+                    </ul>
+                  </div>
+                </div>
+
+                {sig.fouten && sig.fouten.length > 0 && (
+                  <div className="mt-4 p-3 rounded-lg border border-[#30363d] bg-[#0d1117] text-[11px] text-[#8b949e] font-mono space-y-1">
+                    <div className="flex items-center gap-1.5 text-amber-400 font-semibold not-italic">
+                      <Info className="w-3.5 h-3.5" /> Niet ophaalbaar (eerlijk gerapporteerd, geen aanname):
+                    </div>
+                    {sig.fouten.map((f, i) => (
+                      <div key={i} className="pl-5">• {f}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* MAIN BENTO GRID */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
@@ -842,10 +1032,15 @@ export default function App() {
                               {risk.toelichting}
                             </p>
                             <div className="flex justify-between items-center pt-1.5 border-t border-[#30363d]/50 text-[9px] font-mono text-[#8b949e]">
-                              <span>Expertisecentrum:</span>
-                              <span className={risk.model.includes("Claude") ? "text-blue-400" : "text-purple-400"}>
-                                {risk.model}
+                              <span className="flex items-center gap-1.5">
+                                <span>Expertisecentrum:</span>
+                                <span className={risk.model.includes("Claude") ? "text-blue-400" : "text-purple-400"}>
+                                  {risk.model}
+                                </span>
                               </span>
+                              {(() => { const b = bronBadgeStyle(risk.bron); return b ? (
+                                <span className={`px-1.5 py-0.5 rounded border ${b.cls}`}>{b.label}</span>
+                              ) : null; })()}
                             </div>
                           </div>
                         );
@@ -885,10 +1080,15 @@ export default function App() {
                               {pos.toelichting}
                             </p>
                             <div className="flex justify-between items-center pt-1.5 border-t border-[#30363d]/50 text-[9px] font-mono text-[#8b949e]">
-                              <span>Expertisecentrum:</span>
-                              <span className={pos.model.includes("Claude") ? "text-blue-400" : "text-purple-400"}>
-                                {pos.model}
+                              <span className="flex items-center gap-1.5">
+                                <span>Expertisecentrum:</span>
+                                <span className={pos.model.includes("Claude") ? "text-blue-400" : "text-purple-400"}>
+                                  {pos.model}
+                                </span>
                               </span>
+                              {(() => { const b = bronBadgeStyle(pos.bron); return b ? (
+                                <span className={`px-1.5 py-0.5 rounded border ${b.cls}`}>{b.label}</span>
+                              ) : null; })()}
                             </div>
                           </div>
                         );
@@ -923,10 +1123,14 @@ export default function App() {
             <span className="text-xs font-mono text-[#8b949e] tracking-widest uppercase font-bold">MEDSEC COMPLIANCE CHECKER V1.0.0</span>
           </div>
           <p className="text-xs text-[#8b949e] max-w-3xl mx-auto leading-relaxed px-4">
-            <strong>Disclaimer:</strong> Deze screening betreft een indicatieve compliance-analyse uitgevoerd door twee 
-            onafhankelijke taalmodellen (Claude & GPT-4o) op basis van de URL, bekende publicaties, dns records en sectorale 
-            benchmarks. Deze scan is nadrukkelijk <u>geen</u> vervanging voor een formele NEN 7510 audit, 
-            ISAE 3402 type II verklaring of onafhankelijke penetratietest. Er kunnen geen rechten worden ontleend aan deze uitkomsten.
+            <strong>Disclaimer:</strong> Dit is een geautomatiseerde scan van <u>extern waarneembare signalen</u> — de
+            "buitenkant" van de applicatie (HTTPS, securityheaders, security.txt, publiek privacybeleid en op de eigen site
+            geclaimde normen), beoordeeld door twee onafhankelijke taalmodellen. Het is <u>geen</u> audit en <u>geen</u>
+            vervanging voor een formele NEN 7510-/ISO 27001-certificering door een geaccrediteerde auditor, een ISAE 3402-verklaring
+            of een penetratietest. Een lage score kan duiden op zwakke <em>publieke</em> signalen — niet noodzakelijk op onveilige
+            techniek; en een hoge score op sterke publieke signalen is geen garantie voor de werkelijke interne beveiliging.
+            De daadwerkelijke serverconfiguratie, verwerkersovereenkomsten en het interne ISMS zijn vanaf de buitenkant niet
+            verifieerbaar. Er kunnen geen rechten worden ontleend aan deze uitkomsten.
           </p>
           <div className="flex flex-wrap justify-center gap-6 text-[10px] text-[#8b949e] font-mono border-t border-[#30363d]/50 pt-4 max-w-xl mx-auto">
             <div className="flex items-center gap-1.5">

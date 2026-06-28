@@ -94,22 +94,87 @@ export const defaultAnalysis: AnalysisPayload = {
     {
       titel: "Correcte HTTPS- & TLS-beveiliging",
       toelichting: "De applicatie dwingt HTTPS af en maakt gebruik van up-to-date encryptieprotocollen (TLS 1.3), waarmee gegevens in transit afdoende worden beschermd.",
-      model: "Claude"
+      model: "Claude",
+      bron: "gemeten"
     },
     {
       titel: "Actueel en zorg-specifiek Privacybeleid",
       toelichting: "Het privacyreglement bevat specifieke bepalingen omtrent medische gegevens conform AVG Artikel 9 en de Wet op de geneeskundige behandelingsovereenkomst (WGBO).",
-      model: "GPT-4o"
+      model: "GPT-4o",
+      bron: "gemeten"
     },
     {
       titel: "Verplichte Multi-Factor Authenticatie",
       toelichting: "Toegangscontrolemechanismen vereisen verplichte MFA voor beheerders en zorgverleners, wat ongeoorloofde toegang effectief blokkeert.",
-      model: "Claude"
+      model: "Claude",
+      bron: "afgeleid"
     },
     {
       titel: "Heldere procedure voor datalekken",
       toelichting: "De documentatie omschrijft een gedegen proces voor het melden van datalekken bij de Autoriteit Persoonsgegevens (AP) binnen 72 uur.",
-      model: "GPT-4o"
+      model: "GPT-4o",
+      bron: "geclaimd op eigen site"
     }
-  ]
+  ],
+  signals: {
+    domein: "zorgportaal-nederland.nl",
+    finalUrl: "https://zorgportaal-nederland.nl",
+    fetchedAt: "2026-06-27T00:00:00Z",
+    reachable: "gevonden",
+    https: {
+      status: "gevonden",
+      httpsBereikbaar: true,
+      httpDoorverwijzing: true,
+      tlsOk: true,
+      bron: "HTTPS-respons hoofdpagina"
+    },
+    securityHeaders: {
+      status: "gevonden",
+      items: [
+        { naam: "Strict-Transport-Security (HSTS)", aanwezig: true, waarde: "max-age=31536000; includeSubDomains" },
+        { naam: "Content-Security-Policy (CSP)", aanwezig: true, waarde: "default-src 'self'" },
+        { naam: "X-Frame-Options", aanwezig: true, waarde: "DENY" },
+        { naam: "X-Content-Type-Options", aanwezig: true, waarde: "nosniff" },
+        { naam: "Referrer-Policy", aanwezig: true, waarde: "strict-origin-when-cross-origin" },
+        { naam: "Permissions-Policy", aanwezig: false, waarde: null }
+      ],
+      aanwezig: 5,
+      totaal: 6,
+      bron: "Response headers hoofdpagina"
+    },
+    securityTxt: {
+      status: "gevonden",
+      gevondenOp: "https://zorgportaal-nederland.nl/.well-known/security.txt",
+      heeftContact: true,
+      heeftPolicy: true,
+      bron: "/.well-known/security.txt"
+    },
+    privacybeleid: {
+      status: "gevonden",
+      gevondenOp: "https://zorgportaal-nederland.nl/privacy",
+      items: [
+        { key: "avg", naam: "Verwijzing naar AVG/GDPR", gevonden: true },
+        { key: "verwerkersovereenkomst", naam: "Verwerkersovereenkomst (DPA)", gevonden: true },
+        { key: "fgDpo", naam: "Functionaris Gegevensbescherming (FG/DPO)", gevonden: true },
+        { key: "grondslag", naam: "Verwerkingsgrondslag", gevonden: true },
+        { key: "bewaartermijn", naam: "Bewaartermijnen", gevonden: false },
+        { key: "rechten", naam: "Rechten van betrokkenen", gevonden: true }
+      ],
+      bron: "Privacy-/cookiepagina"
+    },
+    certificeringen: {
+      status: "geclaimd op eigen site",
+      gevonden: [{ norm: "NEN 7510", op: "https://zorgportaal-nederland.nl/privacy" }],
+      trefwoorden: ["certificering genoemd"],
+      bron: "HTML/tekst van eigen site (geclaimd)"
+    },
+    metaInfo: {
+      taal: "nl",
+      heeftContactOfColofon: true,
+      euTld: true,
+      bron: "Hoofdpagina HTML"
+    },
+    fouten: [],
+    durationMs: 980
+  }
 };
